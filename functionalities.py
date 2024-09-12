@@ -7,7 +7,6 @@ from shazamio import Shazam
 from difflib import SequenceMatcher
 import numpy as np
 import requests
-
 from spotify_client import sp
 
 ######################################### General helpers  #############################################################
@@ -61,23 +60,24 @@ def add_tracks_to_playlist(sp, playlist_id, track_ids):
     else:
         print("No new tracks to add; all tracks are already in the playlist.")
 
-def remove_duplicates_from_playlist(sp, playlist_id):
-    existing_tracks = get_all_playlist_tracks(sp, playlist_id)
-    seen_tracks = set()
-    duplicate_track_uris = []
-    for track_id in existing_tracks:
-        if track_id in seen_tracks:
-            duplicate_track_uris.append(track_id)
-        else:
-            seen_tracks.add(track_id)
-    if duplicate_track_uris:
-        batch_size = 100
-        for i in range(0, len(duplicate_track_uris), batch_size):
-            batch = duplicate_track_uris[i:i + batch_size]
-            sp.playlist_remove_all_occurrences_of_items(playlist_id, batch)
-            print(f"Removed {len(batch)} duplicate tracks from the playlist.")
-    else:
-        print("No duplicate tracks found in the playlist.")
+def collect_all_tracks_from_playlists(sp, user_id, playlist_names):
+    all_track_ids = []
+    for playlist_name in playlist_names:
+        playlist_id = create_or_get_playlist(sp, user_id, playlist_name)
+        offset = 0
+        while True:
+            # Fetch tracks in batches of 100
+            results = sp.playlist_tracks(playlist_id, offset=offset, limit=100)
+            tracks = results['items']
+            if not tracks:
+                break  # If no more tracks are returned, exit the loop
+            for track in tracks:
+                track_id = track['track']['id']
+                if track_id:
+                    all_track_ids.append(track_id)
+            offset += 100  # Increase the offset to get the next batch
+    return all_track_ids
+
 ########################################################################################################################
 
 
@@ -292,15 +292,6 @@ def process_soundcloud_links(links):
 
 ############################################### Search engine #########################################################
 
-def pre_clean_string(text):
-    # Lowercase the string and remove extra characters such as '[WSNF093]' or other common tags
-    textup = text.lower()
-    textup = re.sub(r'\(ft\..*?\)', '', textup)
-    textup = re.sub(r'\(feat\..*?\)', '', textup)
-    textup = re.sub(r'\(featuring.*?\)', '', textup)
-    textup = re.sub(r'\[.*?\]', '', textup)  # Remove anything inside square brackets
-    textup = re.sub(r'\((?!.*?\b(mix|remix|version|edit)\b).*?\)', '', textup)
-    return textup.strip()
 def clean_string(text):
     # Lowercase the string and remove extra characters such as '[WSNF093]' or other common tags
     textup = text.lower()
@@ -344,12 +335,14 @@ def token_based_similarity(query, result, min_similarity=0.65, max_similarity=1.
 def search_spotify_track(sp, query_title, query_artist=None, min_similarity=0.65, max_similarity=1.0):
 
     if query_artist is None:
-        clean_query = pre_clean_string(query_title)
+        clean_query = clean_string(query_title)
         result = sp.search(q=clean_query, type='track', limit=1)
         listid = 0
+        prelim_artist = result['tracks']['items'][0]['artists'][0]['name'].lower()
+        prelim_title = result['tracks']['items'][0]['name'].lower()
 
         if result['tracks']['items']:
-            if (not (result['tracks']['items'][0]['artists'][0]['name'].lower() in clean_query) or
+            if (not (prelim_artist in clean_query and prelim_title.split(' ')[0] in clean_query) or
                     ("remix" in result['tracks']['items'][0]['name'].lower() and "remix" not in clean_query)):
                 result = sp.search(q=clean_query, type='track', limit=5)
                 index = []
@@ -373,6 +366,13 @@ def search_spotify_track(sp, query_title, query_artist=None, min_similarity=0.65
             track_info = result['tracks']['items'][listid]
             result_title = track_info['name']
             result_artist = track_info['artists'][0]['name']  # Take the first artist
+
+            # result_album = track_info['album']['name']
+            # if len(track_info['artists']) > 1 and track_info['artists'][1]['name'].lower() in clean_query and track_info['artists'][1]['name'].lower() not in result_title.lower():
+            #     result_artist += ' ' + track_info['artists'][1]['name']
+            # if clean_string(result_album.split(',')[0]) in clean_query and clean_string(result_album.split(',')[0]) not in result_title.lower():
+            #     mixed_result = result_artist + " - " + result_title + " - " + result_album.split(',')[0]
+            # else:
 
             mixed_result = result_artist + " - " + result_title
             if token_based_similarity(query_title, mixed_result, min_similarity=min_similarity, max_similarity=max_similarity):
@@ -409,8 +409,15 @@ def search_spotify_track(sp, query_title, query_artist=None, min_similarity=0.65
             result_title = track_info['name']
             result_artist = track_info['artists'][0]['name']  # Take the first artist
 
-            mixed_title = query_artist + " - " + query_title
+            # result_album = track_info['album']['name']
+            # if len(track_info['artists']) > 1 and track_info['artists'][1]['name'].lower() in query.lower() and track_info['artists'][1]['name'].lower() not in result_title.lower():
+            #     result_artist += ' ' + track_info['artists'][1]['name']
+            # if clean_string(result_album.split(',')[0]) in query.lower() and clean_string(result_album.split(',')[0]) not in result_title.lower():
+            #     mixed_result = result_artist + " - " + result_title + " - " + result_album.split(',')[0]
+            # else:
+
             mixed_result = result_artist + " - " + result_title
+            mixed_title = query_artist + " - " + query_title
             if token_based_similarity(mixed_title, mixed_result, min_similarity=min_similarity, max_similarity=max_similarity):
                 return track_info['id']
         else:
