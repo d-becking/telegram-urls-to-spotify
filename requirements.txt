@@ -1,5 +1,6 @@
 spotipy
 google-api-python-client
 beautifulsoup4
+shazamio
 argparse
 numpy<2

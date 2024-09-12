@@ -2,11 +2,13 @@ import os
 import glob
 import json
 import argparse
+import asyncio
 
 from spotify_client import sp
 from functionalities import (process_html_files, load_links_from_json, create_or_get_playlist, extract_spotify_track_ids,
                              add_tracks_to_playlist, remove_duplicates_from_playlist, extract_youtube_video_ids,
-                             get_video_titles_from_youtube, search_spotify_track, get_playlist_info)
+                             get_video_titles_from_youtube, process_shazam_links,
+                             search_spotify_track, get_playlist_info)
 
 parser = argparse.ArgumentParser(description='Spotify playlist automat')
 parser.add_argument('--print_playlist_info', action="store_true", help='prints meta info of a playlist link')
@@ -17,7 +19,7 @@ parser.add_argument('--extract_new_links', action="store_true", help='extract li
 parser.add_argument("--tg_chat_export_path", default="./chat_data", help='path to Telegram-exported html files')
 parser.add_argument("--spotify", action="store_true", help='generate/update spotify playlist')
 parser.add_argument("--yt", action="store_true", help='generate/update youtube playlist')
-
+parser.add_argument("--shazam", action="store_true", help='generate/update shazam playlist')
 
 def main():
     args = parser.parse_args()
@@ -26,6 +28,7 @@ def main():
 
     if args.extract_new_links:
         html_files = glob.glob(os.path.join(args.tg_chat_export_path, "*.html"))
+        html_files.sort(key=lambda x: os.path.basename(x))
         categorized_links = process_html_files(html_files)
         with open(json_file_path, 'w', encoding='utf-8') as json_file:
             json.dump(categorized_links, json_file, indent=4)
@@ -64,6 +67,15 @@ def main():
 
         playlist_id = create_or_get_playlist(sp, user_id, playlist_name)
         add_tracks_to_playlist(sp, playlist_id, youtube_track_ids)
+        remove_duplicates_from_playlist(sp, playlist_id)
+
+    if args.shazam:
+        shazam_urls = load_links_from_json(json_file_path, category='shazam')
+        shazam_track_ids = asyncio.run(process_shazam_links(shazam_urls))
+
+        playlist_name = "BERG_SHAZAM_2_SPOTIFY"
+        playlist_id = create_or_get_playlist(sp, user_id, playlist_name)
+        add_tracks_to_playlist(sp, playlist_id, shazam_track_ids)
         remove_duplicates_from_playlist(sp, playlist_id)
 
     if args.print_playlist_info:
