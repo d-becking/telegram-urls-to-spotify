@@ -78,6 +78,30 @@ def collect_all_tracks_from_playlists(sp, user_id, playlist_names):
             offset += 100  # Increase the offset to get the next batch
     return all_track_ids
 
+
+def check_for_duplicates_in_playlist(sp, playlist_id):
+    # Fetch all tracks from the playlist
+    existing_tracks = get_all_playlist_tracks(sp, playlist_id)
+
+    # Use a dictionary to count occurrences of each track
+    track_counts = {}
+    duplicates = []
+
+    for track_id in existing_tracks:
+        if track_id in track_counts:
+            track_counts[track_id] += 1
+            duplicates.append(track_id)  # Track as duplicate
+        else:
+            track_counts[track_id] = 1
+
+    # Output duplicates if found
+    if duplicates:
+        print(f"Found {len(duplicates)} duplicate tracks in the playlist.")
+        return duplicates
+    else:
+        print("No duplicate tracks found in the playlist.")
+        return None
+
 ########################################################################################################################
 
 
@@ -338,10 +362,10 @@ def search_spotify_track(sp, query_title, query_artist=None, min_similarity=0.65
         clean_query = clean_string(query_title)
         result = sp.search(q=clean_query, type='track', limit=1)
         listid = 0
-        prelim_artist = result['tracks']['items'][0]['artists'][0]['name'].lower()
-        prelim_title = result['tracks']['items'][0]['name'].lower()
 
         if result['tracks']['items']:
+            prelim_artist = result['tracks']['items'][0]['artists'][0]['name'].lower()
+            prelim_title = result['tracks']['items'][0]['name'].lower()
             if (not (prelim_artist in clean_query and prelim_title.split(' ')[0] in clean_query) or
                     ("remix" in result['tracks']['items'][0]['name'].lower() and "remix" not in clean_query)):
                 result = sp.search(q=clean_query, type='track', limit=5)
