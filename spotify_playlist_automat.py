@@ -7,8 +7,8 @@ import asyncio
 from spotify_client import sp
 from functionalities import (process_html_files, load_links_from_json, create_or_get_playlist, extract_spotify_track_ids,
                              add_tracks_to_playlist, remove_duplicates_from_playlist, extract_youtube_video_ids,
-                             get_video_titles_from_youtube, process_shazam_links,
-                             search_spotify_track, get_playlist_info)
+                             get_video_titles_from_youtube, process_shazam_links, process_bandcamp_links,
+                             process_soundcloud_links, search_spotify_track, get_playlist_info)
 
 parser = argparse.ArgumentParser(description='Spotify playlist automat')
 parser.add_argument('--print_playlist_info', action="store_true", help='prints meta info of a playlist link')
@@ -20,6 +20,8 @@ parser.add_argument("--tg_chat_export_path", default="./chat_data", help='path t
 parser.add_argument("--spotify", action="store_true", help='generate/update spotify playlist')
 parser.add_argument("--yt", action="store_true", help='generate/update youtube playlist')
 parser.add_argument("--shazam", action="store_true", help='generate/update shazam playlist')
+parser.add_argument("--bandcamp", action="store_true", help='generate/update bandcamp playlist')
+parser.add_argument("--soundcloud", action="store_true", help='generate/update soundcloud playlist')
 
 def main():
     args = parser.parse_args()
@@ -47,7 +49,7 @@ def main():
         youtube_video_ids = extract_youtube_video_ids(youtube_links)
         video_titles = get_video_titles_from_youtube(youtube_video_ids)
 
-        playlist_name = "BERG_YT_2_SPOTIFY_CERT0.65+"
+        playlist_name = "BERG_YT_2_SPOTIFY"
         youtube_track_ids = []
         for video_id, title in video_titles.items():
             spotify_track_id = search_spotify_track(sp, title, min_similarity=0.65)
@@ -72,10 +74,25 @@ def main():
     if args.shazam:
         shazam_urls = load_links_from_json(json_file_path, category='shazam')
         shazam_track_ids = asyncio.run(process_shazam_links(shazam_urls))
-
         playlist_name = "BERG_SHAZAM_2_SPOTIFY"
         playlist_id = create_or_get_playlist(sp, user_id, playlist_name)
         add_tracks_to_playlist(sp, playlist_id, shazam_track_ids)
+        remove_duplicates_from_playlist(sp, playlist_id)
+
+    if args.bandcamp:
+        bandcamp_urls = load_links_from_json(json_file_path, category='bandcamp')
+        bc_track_ids = process_bandcamp_links(bandcamp_urls)
+        playlist_name = "BERG_BANDCAMP_2_SPOTIFY"
+        playlist_id = create_or_get_playlist(sp, user_id, playlist_name)
+        add_tracks_to_playlist(sp, playlist_id, bc_track_ids)
+        remove_duplicates_from_playlist(sp, playlist_id)
+
+    if args.soundcloud:
+        soundcloud_urls = load_links_from_json(json_file_path, category='soundcloud')
+        soundcloud_track_ids = process_soundcloud_links(soundcloud_urls)
+        playlist_name = "BERG_SOUNDCLOUD_2_SPOTIFY"
+        playlist_id = create_or_get_playlist(sp, user_id, playlist_name)
+        add_tracks_to_playlist(sp, playlist_id, soundcloud_track_ids)
         remove_duplicates_from_playlist(sp, playlist_id)
 
     if args.print_playlist_info:

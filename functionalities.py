@@ -6,6 +6,7 @@ from googleapiclient.discovery import build
 from shazamio import Shazam
 from difflib import SequenceMatcher
 import numpy as np
+import requests
 
 from spotify_client import sp
 
@@ -19,6 +20,10 @@ def load_links_from_json(json_file_path,  category):
         return links_data.get('youtube', []) + links_data.get('youtu.be', [])
     elif category == 'shazam':
         return links_data.get('shazam', [])
+    elif category == 'bandcamp':
+        return links_data.get('bandcamp', [])
+    elif category == 'soundcloud':
+        return links_data.get('soundcloud', [])
 
 def create_or_get_playlist(sp, user_id, playlist_name):
     playlists = sp.user_playlists(user_id)
@@ -198,8 +203,91 @@ async def process_shazam_links(shazam_links):
             track_ids.append(spotify_track_id)
     return track_ids
 
-########################################################################################################################
+### Bandcamp
+def scrape_bandcamp_track_info(link):
+    response = requests.get(link)
+    if response.status_code == 200:
+        try:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            track_title = soup.find('meta', {'property': 'og:title'})['content']
+            artist = soup.find('meta', {'name': 'title'})['content'].split(', by ')[-1]
+            if ", by" in track_title and artist in track_title:
+                track_title = track_title.split(", by")[0]
+            if "remix" in track_title.lower() or "edit" in track_title.lower():
+                return track_title, None
+            else:
+                return track_title, artist
+        except:
+            return None, None
+    return None, None
 
+def process_bandcamp_links(links):
+    track_ids = []
+    for link in links:
+        if not "/track/" in link:
+            continue
+        title, artist = scrape_bandcamp_track_info(link)
+        if title or artist:
+            spotify_track_id = search_spotify_track(sp, query_title=title, query_artist=artist, min_similarity=0.7)
+            if spotify_track_id:
+                track_ids.append(spotify_track_id)
+    return track_ids
+
+### Soundcloud
+def scrape_soundcloud_track_info(link):
+    try:
+        response = requests.get(link)
+        response.raise_for_status()  # Raise an error for bad responses (e.g., 404)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        # 1. Try to extract from <meta> tags
+        artist_tag = soup.find('meta', {'property': 'og:audio:artist'})
+        if artist_tag:
+            artist = artist_tag['content']
+        else:
+            # 2. Try extracting from <span> or <a> tags
+            artist_tag = soup.find('span', {'class': 'soundTitle__username'})
+            if artist_tag:
+                artist = artist_tag.text.strip()
+            else:
+                # 3. Try extracting from Twitter or other <meta> tags
+                artist_tag = soup.find('meta', {'name': 'twitter:audio:artist_name'})
+                if artist_tag:
+                    artist = artist_tag['content']
+                else:
+                    # 4. As a last resort, use the <title> tag
+                    full_title = soup.find('title').text
+                    if " by " in full_title:
+                        artist = full_title.split(" by ")[1].split(" | ")[0].strip()
+                    else:
+                        artist = None
+        # Extract the track title from <meta> or fallback to <title>
+        track_title_tag = soup.find('meta', {'property': 'og:title'})
+        if track_title_tag:
+            track_title = track_title_tag['content']
+        else:
+            full_title = soup.find('title').text
+            if " by " in full_title:
+                track_title = full_title.split(" by ")[0].replace("Stream ", "").strip()
+            else:
+                track_title = None
+        if clean_string(artist) in track_title.lower():
+            return track_title, None
+        else:
+            return track_title, artist
+    except Exception as e:
+        return None, None
+
+def process_soundcloud_links(links):
+    track_ids = []
+    for link in links:
+        title, artist = scrape_soundcloud_track_info(link)
+        if title or artist:
+            spotify_track_id = search_spotify_track(sp, query_title=title, query_artist=artist, min_similarity=0.65)
+            if spotify_track_id:
+                track_ids.append(spotify_track_id)
+    return track_ids
+
+########################################################################################################################
 
 
 ############################################### Search engine #########################################################
@@ -323,9 +411,11 @@ def search_spotify_track(sp, query_title, query_artist=None, min_similarity=0.65
 
             mixed_title = query_artist + " - " + query_title
             mixed_result = result_artist + " - " + result_title
-            if token_based_similarity(mixed_title, mixed_result, min_similarity=min_similarity,
-                                      max_similarity=max_similarity):
+            if token_based_similarity(mixed_title, mixed_result, min_similarity=min_similarity, max_similarity=max_similarity):
                 return track_info['id']
+        else:
+            return search_spotify_track(sp, query_title)
+
     return None
 ########################################################################################################################
 
