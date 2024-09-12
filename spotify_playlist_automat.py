@@ -12,10 +12,6 @@ from functionalities import (process_html_files, load_links_from_json, create_or
 
 
 parser = argparse.ArgumentParser(description='Spotify playlist automat')
-parser.add_argument('--print_playlist_info', action="store_true", help='prints meta info of a playlist link')
-parser.add_argument('--playlist_url',
-                                default='https://open.spotify.com/playlist/7lwr0g1SzDVSMT3lDtctLz?si=765b47477f094fe7',
-                                help='a playlist link')
 parser.add_argument('--extract_new_links', action="store_true", help='extract links from Telegram-exported chat html data')
 parser.add_argument("--tg_chat_export_path", default="./chat_data", help='path to Telegram-exported html files')
 parser.add_argument("--spotify", action="store_true", help='generate/update spotify playlist')
@@ -24,6 +20,11 @@ parser.add_argument("--shazam", action="store_true", help='generate/update shaza
 parser.add_argument("--bandcamp", action="store_true", help='generate/update bandcamp playlist')
 parser.add_argument("--soundcloud", action="store_true", help='generate/update soundcloud playlist')
 parser.add_argument("--all", action="store_true", help='generate/update all playlists')
+parser.add_argument("--merge_playlists", action="store_true", help='Merge all playlists into one Allstar playlist')
+parser.add_argument('--print_playlist_info', action="store_true", help='prints meta info of a playlist link')
+parser.add_argument('--playlist_url',
+                                default='https://open.spotify.com/playlist/7lwr0g1SzDVSMT3lDtctLz?si=765b47477f094fe7',
+                                help='a playlist link')
 
 
 def main():
@@ -89,18 +90,19 @@ def main():
         playlist_id = create_or_get_playlist(sp, user_id, "BERG_SOUNDCLOUD_2_SPOTIFY")
         add_tracks_to_playlist(sp, playlist_id, unique_track_ids)
 
-    playlist_names = [ # Create joint playlist "BERG_ALLSTARS"
-        "BERG_SPOTIFY_ONLY",
-        "BERG_YT_2_SPOTIFY",
-        "BERG_SHAZAM_2_SPOTIFY",
-        "BERG_BANDCAMP_2_SPOTIFY",
-        "BERG_SOUNDCLOUD_2_SPOTIFY"
-    ]
-    all_track_ids = collect_all_tracks_from_playlists(sp, user_id, playlist_names)
-    all_unique_track_ids = list(dict.fromkeys(all_track_ids))
-    random.shuffle(all_unique_track_ids)
-    playlist_id = create_or_get_playlist(sp, user_id, "BERG_ALLSTARS")
-    add_tracks_to_playlist(sp, playlist_id, all_unique_track_ids)
+    if args.merge_playlists:
+        playlist_names = [ # Create joint playlist "BERG_ALLSTARS"
+            "BERG_SPOTIFY_ONLY",
+            "BERG_YT_2_SPOTIFY",
+            "BERG_SHAZAM_2_SPOTIFY",
+            "BERG_BANDCAMP_2_SPOTIFY",
+            "BERG_SOUNDCLOUD_2_SPOTIFY"
+        ]
+        all_track_ids = collect_all_tracks_from_playlists(sp, user_id, playlist_names)
+        all_unique_track_ids = list(dict.fromkeys(all_track_ids))
+        random.shuffle(all_unique_track_ids)
+        playlist_id = create_or_get_playlist(sp, user_id, "BERG_ALLSTARS")
+        add_tracks_to_playlist(sp, playlist_id, all_unique_track_ids)
 
     if args.print_playlist_info:
         playlist_id = args.playlist_url.split("/")[-1].split("?")[0]
