@@ -26,11 +26,11 @@ def load_links_from_json(json_file_path,  category):
 
 def create_or_get_playlist(sp, user_id, playlist_name):
     playlists = sp.user_playlists(user_id)
-    for playlist in playlists['items']:# Check if the playlist already exists
+    for playlist in playlists['items']: # Check if playlist already exists
         if playlist['name'] == playlist_name:
             print(f"Playlist '{playlist_name}' already exists.")
             return playlist['id']
-    # Create a new playlist if it doesn't exist
+    # Create new if does not exist
     new_playlist = sp.user_playlist_create(user_id, playlist_name, public=False)
     print(f"Created new playlist '{playlist_name}'.")
     return new_playlist['id']
@@ -49,7 +49,7 @@ def get_all_playlist_tracks(sp, playlist_id):
 
 def add_tracks_to_playlist(sp, playlist_id, track_ids):
     existing_track_ids = get_all_playlist_tracks(sp, playlist_id)
-    # Filter out track IDs that are already in the playlist
+    # Filter track IDs that are already in pl
     new_tracks = [track_id for track_id in track_ids if track_id not in existing_track_ids]
     if new_tracks:
         batch_size = 100
@@ -66,42 +66,33 @@ def collect_all_tracks_from_playlists(sp, user_id, playlist_names):
         playlist_id = create_or_get_playlist(sp, user_id, playlist_name)
         offset = 0
         while True:
-            # Fetch tracks in batches of 100
-            results = sp.playlist_tracks(playlist_id, offset=offset, limit=100)
+            results = sp.playlist_tracks(playlist_id, offset=offset, limit=100) # Fetch tracks in batches of 100
             tracks = results['items']
             if not tracks:
-                break  # If no more tracks are returned, exit the loop
+                break  # If no more tracks returned exit loop
             for track in tracks:
                 track_id = track['track']['id']
                 if track_id:
                     all_track_ids.append(track_id)
-            offset += 100  # Increase the offset to get the next batch
+            offset += 100  # Increase the offset to get next batch
     return all_track_ids
 
-
 def check_for_duplicates_in_playlist(sp, playlist_id):
-    # Fetch all tracks from the playlist
     existing_tracks = get_all_playlist_tracks(sp, playlist_id)
-
-    # Use a dictionary to count occurrences of each track
     track_counts = {}
     duplicates = []
-
     for track_id in existing_tracks:
         if track_id in track_counts:
             track_counts[track_id] += 1
-            duplicates.append(track_id)  # Track as duplicate
+            duplicates.append(track_id)
         else:
             track_counts[track_id] = 1
-
-    # Output duplicates if found
     if duplicates:
         print(f"Found {len(duplicates)} duplicate tracks in the playlist.")
         return duplicates
     else:
         print("No duplicate tracks found in the playlist.")
         return None
-
 ########################################################################################################################
 
 
@@ -158,7 +149,6 @@ def process_html_files(file_paths):
         all_links.extend(links)
     categorized_links = categorize_links(all_links)
     return categorized_links
-
 ########################################################################################################################
 
 
@@ -190,7 +180,6 @@ def get_video_titles_from_youtube(video_ids):
     api_key = os.getenv("YOUTUBE_API_KEY", "")
     youtube = build('youtube', 'v3', developerKey=api_key)
     video_titles = {}
-
     for i in range(0, len(video_ids), 50):  # YouTube API allows max 50 IDs per request
         request = youtube.videos().list(part='snippet', id=','.join(video_ids[i:i + 50]))
         response = request.execute()
@@ -201,7 +190,6 @@ def get_video_titles_from_youtube(video_ids):
             elif 'tags' in item['snippet'] and len(item['snippet']['tags']) >= 1:
                 title = item['snippet']['tags'][0] + ' - ' + item['snippet']['title']
             video_titles[video_id] = title
-
     return video_titles
 
 ### Shazam
@@ -209,7 +197,7 @@ def extract_shazam_ids(link):
     # This regex matches "/track/" followed by a sequence of digits (at least 1 digit, no upper limit)
     match = re.search(r'/track/(\d+)', link)
     if match:
-        shazam_id = match.group(1)  # Extract the track ID (sequence of digits)
+        shazam_id = match.group(1)  # Extract track ID
         return shazam_id
     return None
 async def get_shazam_track_info(track_id):
@@ -263,28 +251,27 @@ def scrape_soundcloud_track_info(link):
         response = requests.get(link)
         response.raise_for_status()  # Raise an error for bad responses (e.g., 404)
         soup = BeautifulSoup(response.text, 'html.parser')
-        # 1. Try to extract from <meta> tags
+        # Try to extract from <meta> tags
         artist_tag = soup.find('meta', {'property': 'og:audio:artist'})
         if artist_tag:
             artist = artist_tag['content']
         else:
-            # 2. Try extracting from <span> or <a> tags
+            # Try extracting from <span> or <a> tags
             artist_tag = soup.find('span', {'class': 'soundTitle__username'})
             if artist_tag:
                 artist = artist_tag.text.strip()
             else:
-                # 3. Try extracting from Twitter or other <meta> tags
+                # Try extracting from Twitter or other <meta> tags
                 artist_tag = soup.find('meta', {'name': 'twitter:audio:artist_name'})
                 if artist_tag:
                     artist = artist_tag['content']
                 else:
-                    # 4. As a last resort, use the <title> tag
+                    # use the <title> tag
                     full_title = soup.find('title').text
                     if " by " in full_title:
                         artist = full_title.split(" by ")[1].split(" | ")[0].strip()
                     else:
                         artist = None
-        # Extract the track title from <meta> or fallback to <title>
         track_title_tag = soup.find('meta', {'property': 'og:title'})
         if track_title_tag:
             track_title = track_title_tag['content']
@@ -310,12 +297,10 @@ def process_soundcloud_links(links):
             if spotify_track_id:
                 track_ids.append(spotify_track_id)
     return track_ids
-
 ########################################################################################################################
 
 
 ############################################### Search engine #########################################################
-
 def clean_string(text):
     # Lowercase the string and remove extra characters such as '[WSNF093]' or other common tags
     textup = text.lower()
@@ -329,7 +314,7 @@ def clean_string(text):
     textup = re.sub(r'\(featuring.*?\)', '', textup)
     textup = re.sub(r'\[.*?\]', '', textup)  # Remove anything inside square brackets
     textup = re.sub(r'\((?!.*?\b(mix|remix|version|edit)\b).*?\)', '', textup)
-    textup = re.sub(r'[^a-zA-Z0-9\s\-\u00C0-\u017F]', '', textup) # Keep alphanumeric characters (including accented letters), spaces, and hyphens
+    textup = re.sub(r'[^a-zA-Z0-9\s\-\u00C0-\u017F]', '', textup)  # Keep alphanumeric characters (including accented letters), spaces, and hyphens
     return textup.strip()
 
 def token_based_similarity(query, result, min_similarity=0.65, max_similarity=1.0):
@@ -453,22 +438,18 @@ def search_spotify_track(sp, query_title, query_artist=None, min_similarity=0.65
 ##################################### Additional funcitonalities  ######################################################
 def get_playlist_info(playlist_id):
     playlist = sp.playlist(playlist_id)
-
     print(f"Playlist Name: {playlist['name']}")
     print(f"Description: {playlist['description']}")
     print(f"Total Tracks: {playlist['tracks']['total']}")
     tracks = []
     offset = 0
     limit = 100
-
-    # Fetch tracks in batches of 100
-    while True:
+    while True:  # Fetch tracks in batches of 100
         response = sp.playlist_tracks(playlist_id, offset=offset, limit=limit)
         tracks.extend(response['items'])
         if response['next'] is None:
             break
         offset += limit
-
     for idx, item in enumerate(tracks):
         track = item['track']
         added_at = item['added_at']
