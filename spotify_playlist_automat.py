@@ -8,7 +8,8 @@ from spotify_client import sp
 from functionalities import (process_html_files, load_links_from_json, create_or_get_playlist, extract_spotify_track_ids,
                              add_tracks_to_playlist, extract_youtube_video_ids, get_video_titles_from_youtube,
                              process_shazam_links, process_bandcamp_links, process_soundcloud_links, search_spotify_track,
-                             get_playlist_info, collect_all_tracks_from_playlists, check_for_duplicates_in_playlist)
+                             get_playlist_info, collect_all_tracks_from_playlists, check_for_duplicates_in_playlist,
+                             process_discogs_csv_rows)
 
 
 parser = argparse.ArgumentParser(description='Spotify Playlist Automat (SPA)')
@@ -24,6 +25,7 @@ parser.add_argument("--merge_playlists", action="store_true", help='Merge all pl
 parser.add_argument('--print_playlist_info', action="store_true", help='prints meta info of a playlist link')
 parser.add_argument('--playlist_url', default='https://open.spotify.com/playlist/<YOUR_PLAYLIST_ID>', type=str, help='playlist link')
 parser.add_argument('--pers_pl_name_pref', default='', type=str, help='Personalized prefix for playlist name')
+parser.add_argument('--discogs_csv_path', default='', type=str, help='Path to Discogs-exported csv file')
 
 
 def main():
@@ -105,6 +107,12 @@ def main():
         playlist_id = create_or_get_playlist(sp, user_id, f"{pl_prefix}ALLSTARS")
         add_tracks_to_playlist(sp, playlist_id, all_unique_track_ids)
         check_for_duplicates_in_playlist(sp, playlist_id)
+
+    if args.discogs_csv_path:
+        discogs_track_ids = process_discogs_csv_rows(args.discogs_csv_path, min_similarity=0.8)
+        unique_track_ids = list(dict.fromkeys(discogs_track_ids))
+        playlist_id = create_or_get_playlist(sp, user_id, f"{pl_prefix}DISCOGS_2_SPOTIFY")
+        add_tracks_to_playlist(sp, playlist_id, unique_track_ids)
 
     if args.print_playlist_info:
         playlist_id = args.playlist_url.split("/")[-1].split("?")[0]

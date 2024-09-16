@@ -7,6 +7,8 @@ from shazamio import Shazam
 from difflib import SequenceMatcher
 import numpy as np
 import requests
+import csv
+from datetime import datetime
 from spotify_client import sp
 
 ######################################### General helpers  #############################################################
@@ -297,6 +299,70 @@ def process_soundcloud_links(links):
             if spotify_track_id:
                 track_ids.append(spotify_track_id)
     return track_ids
+
+def process_discogs_csv_rows(discogs_csv_path, min_similarity=0.65):
+    track_ids = []
+    with open(discogs_csv_path, newline='', encoding='utf-8') as csvfile:
+        reader = csv.reader(csvfile)
+        header = next(reader, None)
+        rows = []
+        for row in reader:
+            rows.append((row, datetime.strptime(row[9], '%Y-%m-%d %H:%M:%S')))
+    rows.sort(key=lambda x: x[1])  # Sort the rows by the date added (oldest to newest)
+
+    for row, _ in rows:
+        sim = 0
+        sim_year = 0
+        if "CD" in row[4].strip() and not "LP" in row[4].strip():  # no CDs, only Vinyl
+            continue
+        if "to sell" in row[8].strip():
+            continue
+        artist = clean_discogs_string(row[1])  # Column 2: Artist
+        album_name = clean_string(row[2])  # Column 3: Single, EP, Album, or LP name
+        label = clean_discogs_string(row[3])  # Column 4: Label name
+        year = row[6].strip()
+
+        result_year = sp.search(q=f'artist:{artist} album:{album_name} label:{label} year:{year}', type="album", limit=1)
+        if result_year['albums']['items']:
+            query = f'{artist} {album_name} {year}'
+            album = result_year['albums']['items'][0]
+            artists = " ".join([a["name"] for a in album["artists"]])
+            result_year = f'{artists} {album["name"]} {album["release_date"].split("-")[0]}'
+            sim_year = token_based_similarity(query, result_year, return_sim=True)
+            album_tracks_year = sp.album_tracks(album['id'])['items']
+
+        result = sp.search(q=f'artist:{artist} album:{album_name} label:{label}', type="album", limit=1)
+        if result['albums']['items']:
+            query = f'{artist} {album_name}'
+            album = result['albums']['items'][0]
+            artists = " ".join([a["name"] for a in album["artists"]])
+            result = f'{artists} {album["name"]}'
+            sim = token_based_similarity(query, result, return_sim=True)
+            album_tracks = sp.album_tracks(album['id'])['items']
+
+        if sim > min_similarity or sim_year > min_similarity:
+            if sim > sim_year:
+                track_ids.extend([track['id'] for track in album_tracks])
+            else:
+                track_ids.extend([track['id'] for track in album_tracks_year])
+        else:
+            free_search_sim = []
+            free_search_titles = {}
+            results_unfiltered = sp.search(q=f'{artist} {album_name}', type="album", limit=8)
+            if results_unfiltered['albums']['items']:
+                query = f'{artist} {album_name}'
+                for i, album in enumerate(results_unfiltered['albums']['items']):
+                    artists = " ".join([a["name"] for a in album["artists"]])
+                    result = f'{artists} {album["name"]}'
+                    sim = token_based_similarity(query, result, return_sim=True)
+                    free_search_sim.append(sim)
+                    free_search_titles[i] = sp.album_tracks(album['id'])['items']
+                    if sim < 0.3 or sim == 1:
+                        break
+                sim_argmax = np.argmax(free_search_sim)
+                if free_search_sim[sim_argmax] > min_similarity:
+                    track_ids.extend([track['id'] for track in free_search_titles[sim_argmax]])
+    return track_ids
 ########################################################################################################################
 
 
@@ -317,7 +383,11 @@ def clean_string(text):
     textup = re.sub(r'[^a-zA-Z0-9\s\-\u00C0-\u017F]', '', textup)  # Keep alphanumeric characters (including accented letters), spaces, and hyphens
     return textup.strip()
 
-def token_based_similarity(query, result, min_similarity=0.65, max_similarity=1.0):
+def clean_discogs_string(text):
+    textup = re.sub(r'\s*\(\d+\)', '', text)  # remove the (NUMBER) pattern from the artist or label name
+    return textup.strip()
+
+def token_based_similarity(query, result, min_similarity=0.65, max_similarity=1.0, return_sim=False):
     clean_query = clean_string(query)
     clean_result = clean_string(result)
 
@@ -330,6 +400,10 @@ def token_based_similarity(query, result, min_similarity=0.65, max_similarity=1.
     sequence_similarity = SequenceMatcher(None, clean_query, clean_result).ratio()
 
     sim = np.mean([token_similarity, sequence_similarity])
+
+    if return_sim:
+        return sim
+
     if len(query_tokens) <= 3:
         if max_similarity < 1:
             return sim > min(min_similarity + 0.1, 1.0) and sim < max_similarity
