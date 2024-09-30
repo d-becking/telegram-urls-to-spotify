@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from googleapiclient.discovery import build
 from shazamio import Shazam
 from difflib import SequenceMatcher
+import unicodedata
 import numpy as np
 import requests
 import csv
@@ -48,6 +49,26 @@ def get_all_playlist_tracks(sp, playlist_id):
             break
         offset += limit  # Move to the next page
     return existing_track_ids
+
+def delete_all_playlist_tracks(sp, playlist_id):
+    offset = 0
+    limit = 100  # Spotify API returns up to 100 tracks per request
+    while True:
+        results = sp.playlist_tracks(playlist_id, offset=offset, limit=limit)
+        tracks = [item['track']['uri'] for item in results['items']]
+        if tracks:
+            sp.playlist_remove_all_occurrences_of_items(playlist_id, tracks)
+        else:
+            break
+        if results['next'] is None:  # If there are no more pages
+            break
+        offset = 0
+    remaining_tracks = sp.playlist_tracks(playlist_id, limit=1)
+    if not remaining_tracks['items']:
+        print("All tracks removed successfully.")
+    else:
+        print(f"{len(remaining_tracks['items'])} tracks remain in the playlist.")
+
 
 def add_tracks_to_playlist(sp, playlist_id, track_ids):
     existing_track_ids = get_all_playlist_tracks(sp, playlist_id)
@@ -182,16 +203,23 @@ def get_video_titles_from_youtube(video_ids):
     api_key = os.getenv("YOUTUBE_API_KEY", "")
     youtube = build('youtube', 'v3', developerKey=api_key)
     video_titles = {}
-    for i in range(0, len(video_ids), 50):  # YouTube API allows max 50 IDs per request
-        request = youtube.videos().list(part='snippet', id=','.join(video_ids[i:i + 50]))
+    def clean_video_id(video_id):
+        # Remove any query parameters (e.g., '?feature=shared') from the video ID
+        return re.split(r'[?&]', video_id)[0]
+
+    clean_video_ids = [clean_video_id(vid) for vid in video_ids]
+    for i in range(0, len(clean_video_ids), 50):  # YouTube API allows max 50 IDs per request
+        request = youtube.videos().list(part='snippet', id=','.join(clean_video_ids[i:i + 50]))
         response = request.execute()
-        for item in response['items']:
+        for item in response.get('items', []):
             video_id = item['id']
-            if " - " in item['snippet']['title'] or ' – ' in item['snippet']['title']:
-                title = item['snippet']['title']
+            title = item['snippet']['title']
+            if " - " in title or " – " in title:
+                video_titles[video_id] = title
             elif 'tags' in item['snippet'] and len(item['snippet']['tags']) >= 1:
-                title = item['snippet']['tags'][0] + ' - ' + item['snippet']['title']
-            video_titles[video_id] = title
+                video_titles[video_id] = item['snippet']['tags'][0] + ' - ' + title
+            else:
+                video_titles[video_id] = title
     return video_titles
 
 ### Shazam
@@ -294,8 +322,10 @@ def process_soundcloud_links(links):
     track_ids = []
     for link in links:
         title, artist = scrape_soundcloud_track_info(link)
+        if title:
+            title = re.sub(r'((?:[^-]+ - ){2}).*', r'\1', title)
         if title or artist:
-            spotify_track_id = search_spotify_track(sp, query_title=title, query_artist=artist, min_similarity=0.65)
+            spotify_track_id = search_spotify_track(sp, query_title=title, query_artist=artist, min_similarity=0.7)
             if spotify_track_id:
                 track_ids.append(spotify_track_id)
     return track_ids
@@ -368,20 +398,24 @@ def process_discogs_csv_rows(discogs_csv_path, min_similarity=0.65):
 
 ############################################### Search engine #########################################################
 def clean_string(text):
-    # Lowercase the string and remove extra characters such as '[WSNF093]' or other common tags
-    textup = text.lower()
+    textup = text.lower()  # Lowercase the string
+    textup = textup.replace('\u200b', '')  # Remove zero-width spaces (e.g., \u200b)
+    textup = textup.replace('â\x80\x93', '-')  # Replace corrupted en dash
+    textup = textup.replace('â\x80\x94', '-')  # Replace corrupted em dash
+    textup = unicodedata.normalize('NFKD', textup)
     textup = re.sub(r'original mix', '', textup)
     textup = re.sub(r'original', '', textup)
     textup = re.sub(r'premiere', '', textup)
+    textup = re.sub(r'remastered', '', textup)
     textup = re.sub(r'remaster', '', textup)
     textup = re.sub(r'live version', '', textup)
-    textup = re.sub(r'\(ft\..*?\)', '', textup)
-    textup = re.sub(r'\(feat\..*?\)', '', textup)
-    textup = re.sub(r'\(featuring.*?\)', '', textup)
-    textup = re.sub(r'\[.*?\]', '', textup)  # Remove anything inside square brackets
+    textup = re.sub(r'[()]', '', textup)  # removes parentheses
+    textup = re.sub(r'\[.*?\]', '', textup)  # Remove anything inside square brackets such as '[WSNF093]'
     textup = re.sub(r'\((?!.*?\b(mix|remix|version|edit)\b).*?\)', '', textup)
-    textup = re.sub(r'[^a-zA-Z0-9\s\-\u00C0-\u017F]', '', textup)  # Keep alphanumeric characters (including accented letters), spaces, and hyphens
-    return textup.strip()
+    # Remove unwanted characters, but keep non-alphanumeric characters if they are embedded within a word
+    # Also keep accented characters within the Latin-1 Supplement Unicode block
+    textup = re.sub(r'(?<![\w\u00C0-\u017F])[^\w\s\-\u00C0-\u017F](?![\w\u00C0-\u017F])', '', textup)
+    return textup.strip()  # Remove Leading and Trailing Whitespace
 
 def clean_discogs_string(text):
     textup = re.sub(r'\s*\(\d+\)', '', text)  # remove the (NUMBER) pattern from the artist or label name
@@ -394,17 +428,20 @@ def token_based_similarity(query, result, min_similarity=0.65, max_similarity=1.
     query_tokens = set(clean_query.split())
     result_tokens = set(clean_result.split())
 
+    len_discrepancy_penalty = 1 - np.sqrt(abs(len(query_tokens) - len(result_tokens)) / max(len(query_tokens), len(result_tokens))) * 0.02
+    token_weight = min((len(query_tokens) + len(result_tokens)) / 8, 1.0)
+
     common_tokens = query_tokens.intersection(result_tokens)
-    token_similarity = len(common_tokens) / max(len(query_tokens), len(result_tokens))
+    token_similarity = (len(common_tokens) / max(len(query_tokens), len(result_tokens)))
 
     sequence_similarity = SequenceMatcher(None, clean_query, clean_result).ratio()
 
-    sim = np.mean([token_similarity, sequence_similarity])
+    sim = np.mean([token_similarity, sequence_similarity]) * len_discrepancy_penalty * token_weight
 
     if return_sim:
         return sim
 
-    if len(query_tokens) <= 3:
+    elif len(query_tokens) <= 3:
         if max_similarity < 1:
             return sim > min(min_similarity + 0.1, 1.0) and sim < max_similarity
         else:
@@ -415,98 +452,148 @@ def token_based_similarity(query, result, min_similarity=0.65, max_similarity=1.
         else:
             return sim > min_similarity
 
-def search_spotify_track(sp, query_title, query_artist=None, min_similarity=0.65, max_similarity=1.0):
+def search_spotify_track_old(sp, query_title, query_artist=None, min_similarity=0.65):
 
     if query_artist is None:
         clean_query = clean_string(query_title)
         result = sp.search(q=clean_query, type='track', limit=1)
-        listid = 0
 
         if result['tracks']['items']:
-            prelim_artist = result['tracks']['items'][0]['artists'][0]['name'].lower()
-            prelim_title = result['tracks']['items'][0]['name'].lower()
-            if (not (prelim_artist in clean_query and prelim_title.split(' ')[0] in clean_query) or
-                    ("remix" in result['tracks']['items'][0]['name'].lower() and "remix" not in clean_query)):
-                result = sp.search(q=clean_query, type='track', limit=5)
-                index = []
-                for i, track_info in enumerate(result['tracks']['items']):  # Take the first artist
-                    if ("remix" in track_info['name'].lower() and "remix" not in clean_query):
-                        continue
-                    if track_info['artists'][0]['name'].lower() in clean_query and track_info['name'].lower() in clean_query:
-                        if i == 0:
+
+            track1 = result['tracks']['items'][0]
+            artists = " ".join([a["name"] for a in track1["artists"] if a["name"] not in track1["name"]])
+            result1 = f'{artists} - {track1["name"]}'
+            if clean_string(track1["artists"][0]["name"]) in clean_query:
+                sim1 = token_based_similarity(clean_query, result1, return_sim=True)
+            else:
+                sim1 = 0.0
+
+            if sim1 < 0.9:
+                free_search_sim = []
+                free_search_id = []
+                free_search_res = []
+                results_unfiltered = sp.search(q=clean_query, type='track', limit=6)
+
+                for i, track in enumerate(results_unfiltered['tracks']['items']):
+                    artists = " ".join([a["name"] for a in track["artists"] if a["name"] not in track["name"]])
+                    result = f'{artists} - {track["name"]}'
+                    free_search_id.append(track['id'])
+                    free_search_res.append(result)
+                    if clean_string(track["artists"][0]["name"]) in clean_query:
+                        sim = token_based_similarity(clean_query, result, return_sim=True)
+                        free_search_sim.append(sim)
+                        if track['id'] != track1['id'] and (sim < 0.44 or sim == 1):
                             break
-                        else:
-                            if len(index) < 1:
-                                index.append(i)
-                            else:
-                                index[0] = i
-                    elif track_info['artists'][0]['name'].lower() in clean_query:
-                        index.append(i)
+                    else:
+                        free_search_sim.append(0.0)
 
-                if len(index) > 0:
-                    listid = index[0]
+                sim_argmax = np.argmax(free_search_sim)
+                if free_search_sim[sim_argmax] > sim1 and free_search_sim[sim_argmax] > min_similarity:
+                    result_free_search = free_search_res[sim_argmax]
+                    return free_search_id[sim_argmax]
+                elif sim1 > min_similarity:
+                    return track1['id']
+                else:
+                    return None
+            else:
+                return track1['id']
+        else:
+            return None
 
-            track_info = result['tracks']['items'][listid]
-            result_title = track_info['name']
-            result_artist = track_info['artists'][0]['name']  # Take the first artist
-
-            # result_album = track_info['album']['name']
-            # if len(track_info['artists']) > 1 and track_info['artists'][1]['name'].lower() in clean_query and track_info['artists'][1]['name'].lower() not in result_title.lower():
-            #     result_artist += ' ' + track_info['artists'][1]['name']
-            # if clean_string(result_album.split(',')[0]) in clean_query and clean_string(result_album.split(',')[0]) not in result_title.lower():
-            #     mixed_result = result_artist + " - " + result_title + " - " + result_album.split(',')[0]
-            # else:
-
-            mixed_result = result_artist + " - " + result_title
-            if token_based_similarity(query_title, mixed_result, min_similarity=min_similarity, max_similarity=max_similarity):
-                return track_info['id']
     else:
-        query = f"artist:{query_artist} track:{query_title}"
-        result = sp.search(q=query,  type='track', limit=1)
+        sp_query = f"artist:{query_artist} track:{query_title}"
+        result = sp.search(q=sp_query,  type='track', limit=1)
+        sim_query = f"{query_artist} - {query_title}"
 
-        listid = 0
         if result['tracks']['items']:
-            if (not (result['tracks']['items'][0]['artists'][0]['name'].lower() in query_artist.lower()) or
-                    ("remix" in result['tracks']['items'][0]['name'].lower() and "remix" not in query_title.lower())):
-                result = sp.search(q=query, type='track', limit=5)
-                index = []
-                for i, track_info in enumerate(result['tracks']['items']):  # Take the first artist
-                    if ("remix" in track_info['name'].lower() and "remix" not in query_title.lower()):
-                        continue
-                    if track_info['artists'][0]['name'].lower() in query_artist.lower() and track_info[
-                        'name'].lower() in query_title.lower():
-                        if i == 0:
+
+            track1 = result['tracks']['items'][0]
+            artists = " ".join([a["name"] for a in track1["artists"] if a["name"] not in track1["name"]])
+            result1 = f'{artists} - {track1["name"]}'
+            if clean_string(track1["artists"][0]["name"]) in clean_string(query_artist):
+                sim1 = token_based_similarity(sim_query, result1, return_sim=True)
+            else:
+                sim1 = 0.0
+
+            if sim1 < 0.9:
+                free_search_sim = []
+                free_search_id = []
+                free_search_res = []
+                results_unfiltered = sp.search(q=sp_query, type='track', limit=6)
+
+                for i, track in enumerate(results_unfiltered['tracks']['items']):
+                    artists = " ".join([a["name"] for a in track["artists"] if a["name"] not in track["name"]])
+                    result = f'{artists} - {track["name"]}'
+                    free_search_id.append(track['id'])
+                    free_search_res.append(result)
+                    if clean_string(track["artists"][0]["name"]) in sim_query:
+                        sim = token_based_similarity(sim_query, result, return_sim=True)
+                        free_search_sim.append(sim)
+                        if track['id'] != track1['id'] and (sim < 0.44 or sim == 1):
                             break
-                        else:
-                            if len(index) < 1:
-                                index.append(i)
-                            else:
-                                index[0] = i
-                    elif track_info['artists'][0]['name'].lower() in query_artist.lower():
-                        index.append(i)
+                    else:
+                        free_search_sim.append(0.0)
 
-                if len(index) > 0:
-                    listid = index[0]
-
-            track_info = result['tracks']['items'][listid]
-            result_title = track_info['name']
-            result_artist = track_info['artists'][0]['name']  # Take the first artist
-
-            # result_album = track_info['album']['name']
-            # if len(track_info['artists']) > 1 and track_info['artists'][1]['name'].lower() in query.lower() and track_info['artists'][1]['name'].lower() not in result_title.lower():
-            #     result_artist += ' ' + track_info['artists'][1]['name']
-            # if clean_string(result_album.split(',')[0]) in query.lower() and clean_string(result_album.split(',')[0]) not in result_title.lower():
-            #     mixed_result = result_artist + " - " + result_title + " - " + result_album.split(',')[0]
-            # else:
-
-            mixed_result = result_artist + " - " + result_title
-            mixed_title = query_artist + " - " + query_title
-            if token_based_similarity(mixed_title, mixed_result, min_similarity=min_similarity, max_similarity=max_similarity):
-                return track_info['id']
+                sim_argmax = np.argmax(free_search_sim)
+                if free_search_sim[sim_argmax] > sim1 and free_search_sim[sim_argmax] > min_similarity:
+                    result_free_search = free_search_res[sim_argmax]
+                    return free_search_id[sim_argmax]
+                elif sim1 > min_similarity:
+                    return track1['id']
+                else:
+                    return None
+            else:
+                return track1['id']
         else:
             return search_spotify_track(sp, query_title)
 
-    return None
+
+def search_spotify_track(sp, query_title, query_artist=None, min_similarity=0.65):
+    def get_similarity(clean_query, track):
+        artists = " ".join([a["name"] for a in track["artists"] if a["name"] not in track["name"]])
+        result_str = f'{artists} - {track["name"]}'
+        if clean_string(track["artists"][0]["name"]) in clean_query:
+            similarity = token_based_similarity(clean_query, result_str, return_sim=True)
+        else:
+            similarity = 0.0
+        return similarity
+    def process_results(clean_query, results, ini_track_id=None):
+        best_sim = 0.0
+        best_track_id = None
+        for track in results['tracks']['items']:
+            sim = get_similarity(clean_query, track)
+            if sim > best_sim and sim > min_similarity:
+                best_sim = sim
+                best_track_id = track['id']
+            if track['id'] != ini_track_id and (sim < 0.44 or sim == 1):
+                break
+        return best_track_id
+
+    clean_query = clean_string(f"{query_artist} - {query_title}") if query_artist else clean_string(query_title)
+    search_query = f"artist:{query_artist} track:{query_title}" if query_artist else clean_query
+
+    # Initial search
+    result = sp.search(q=search_query, type='track', limit=1)
+    if not result['tracks']['items']:
+        if query_artist:  # try w/o artist(s) because title might contain artist(s)
+            return search_spotify_track(sp, query_title, min_similarity=min_similarity)
+        else:
+            sim1 = 0.0
+    else:
+        track1 = result['tracks']['items'][0]
+        sim1 = get_similarity(clean_query, track1)
+        if sim1 >= 0.9:
+            return track1['id']
+
+    # Extended search if the first track's similarity isn't high enough
+    results_unfiltered = sp.search(q=search_query, type='track', limit=6)
+    if not results_unfiltered['tracks']['items']:
+        return None
+    else:
+        best_track_id = process_results(clean_query, results_unfiltered, ini_track_id=track1['id'])
+
+    return best_track_id if best_track_id else (track1['id'] if sim1 > min_similarity else None)
+
 ########################################################################################################################
 
 ##################################### Additional funcitonalities  ######################################################
