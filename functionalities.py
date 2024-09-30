@@ -452,107 +452,11 @@ def token_based_similarity(query, result, min_similarity=0.65, max_similarity=1.
         else:
             return sim > min_similarity
 
-def search_spotify_track_old(sp, query_title, query_artist=None, min_similarity=0.65):
-
-    if query_artist is None:
-        clean_query = clean_string(query_title)
-        result = sp.search(q=clean_query, type='track', limit=1)
-
-        if result['tracks']['items']:
-
-            track1 = result['tracks']['items'][0]
-            artists = " ".join([a["name"] for a in track1["artists"] if a["name"] not in track1["name"]])
-            result1 = f'{artists} - {track1["name"]}'
-            if clean_string(track1["artists"][0]["name"]) in clean_query:
-                sim1 = token_based_similarity(clean_query, result1, return_sim=True)
-            else:
-                sim1 = 0.0
-
-            if sim1 < 0.9:
-                free_search_sim = []
-                free_search_id = []
-                free_search_res = []
-                results_unfiltered = sp.search(q=clean_query, type='track', limit=6)
-
-                for i, track in enumerate(results_unfiltered['tracks']['items']):
-                    artists = " ".join([a["name"] for a in track["artists"] if a["name"] not in track["name"]])
-                    result = f'{artists} - {track["name"]}'
-                    free_search_id.append(track['id'])
-                    free_search_res.append(result)
-                    if clean_string(track["artists"][0]["name"]) in clean_query:
-                        sim = token_based_similarity(clean_query, result, return_sim=True)
-                        free_search_sim.append(sim)
-                        if track['id'] != track1['id'] and (sim < 0.44 or sim == 1):
-                            break
-                    else:
-                        free_search_sim.append(0.0)
-
-                sim_argmax = np.argmax(free_search_sim)
-                if free_search_sim[sim_argmax] > sim1 and free_search_sim[sim_argmax] > min_similarity:
-                    result_free_search = free_search_res[sim_argmax]
-                    return free_search_id[sim_argmax]
-                elif sim1 > min_similarity:
-                    return track1['id']
-                else:
-                    return None
-            else:
-                return track1['id']
-        else:
-            return None
-
-    else:
-        sp_query = f"artist:{query_artist} track:{query_title}"
-        result = sp.search(q=sp_query,  type='track', limit=1)
-        sim_query = f"{query_artist} - {query_title}"
-
-        if result['tracks']['items']:
-
-            track1 = result['tracks']['items'][0]
-            artists = " ".join([a["name"] for a in track1["artists"] if a["name"] not in track1["name"]])
-            result1 = f'{artists} - {track1["name"]}'
-            if clean_string(track1["artists"][0]["name"]) in clean_string(query_artist):
-                sim1 = token_based_similarity(sim_query, result1, return_sim=True)
-            else:
-                sim1 = 0.0
-
-            if sim1 < 0.9:
-                free_search_sim = []
-                free_search_id = []
-                free_search_res = []
-                results_unfiltered = sp.search(q=sp_query, type='track', limit=6)
-
-                for i, track in enumerate(results_unfiltered['tracks']['items']):
-                    artists = " ".join([a["name"] for a in track["artists"] if a["name"] not in track["name"]])
-                    result = f'{artists} - {track["name"]}'
-                    free_search_id.append(track['id'])
-                    free_search_res.append(result)
-                    if clean_string(track["artists"][0]["name"]) in sim_query:
-                        sim = token_based_similarity(sim_query, result, return_sim=True)
-                        free_search_sim.append(sim)
-                        if track['id'] != track1['id'] and (sim < 0.44 or sim == 1):
-                            break
-                    else:
-                        free_search_sim.append(0.0)
-
-                sim_argmax = np.argmax(free_search_sim)
-                if free_search_sim[sim_argmax] > sim1 and free_search_sim[sim_argmax] > min_similarity:
-                    result_free_search = free_search_res[sim_argmax]
-                    return free_search_id[sim_argmax]
-                elif sim1 > min_similarity:
-                    return track1['id']
-                else:
-                    return None
-            else:
-                return track1['id']
-        else:
-            return search_spotify_track(sp, query_title)
-
-
 def search_spotify_track(sp, query_title, query_artist=None, min_similarity=0.65):
     def get_similarity(clean_query, track):
         artists = " ".join([a["name"] for a in track["artists"] if a["name"] not in track["name"]])
         result_str = f'{artists} - {track["name"]}'
-        if clean_string(track["artists"][0]["name"]) in clean_query:
+        if any(clean_string(artist["name"]) in clean_query for artist in track["artists"]):
             similarity = token_based_similarity(clean_query, result_str, return_sim=True)
         else:
             similarity = 0.0
