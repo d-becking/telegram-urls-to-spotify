@@ -79,6 +79,13 @@ If you want to merge all generated playlist into one large Allstars playlist use
    python spotify_playlist_automat.py --merge_playlists
    ```
 
+The `example_automator.sh` script can be used to automate processes of URL extraction and search by calling a single 
+line
+   ```bash
+   example_automator.sh 2024-09-13 --test_run
+   ```
+using the --test_run parser argument will prevenrt the code from adding newly found tracks to the playlist(s).
+
 ### License
 
 This project is licensed under the BSD-3 License - see the LICENSE file for details.
