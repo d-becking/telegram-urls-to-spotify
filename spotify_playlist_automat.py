@@ -27,7 +27,9 @@ parser.add_argument('--playlist_url', default='https://open.spotify.com/playlist
 parser.add_argument('--pers_pl_name_pref', default='', type=str, help='Personalized prefix for playlist name')
 parser.add_argument('--discogs_csv_path', default='', type=str, help='Path to Discogs-exported csv file')
 parser.add_argument("--delete_all_tracks", action="store_true", help='Deletes all tracks from a playlist')
-
+parser.add_argument("--verbose", action="store_true", help='Stdout process information.')
+parser.add_argument("--test_run", action="store_true", help='Only tests for new search results but does not add them.')
+print("###########################################################################################")
 
 def main():
     args = parser.parse_args()
@@ -50,7 +52,7 @@ def main():
             spotify_links = load_links_from_json(json_file_path, category='spotify')
             track_ids = extract_spotify_track_ids(spotify_links)
             unique_track_ids = list(dict.fromkeys(track_ids))
-            add_tracks_to_playlist(sp, playlist_id, unique_track_ids)
+            add_tracks_to_playlist(sp, playlist_id, unique_track_ids, testrun=args.test_run)
 
     if args.yt or args.all:  # Extract YouTube video IDs and get titles from YouTube API
         playlist_id = create_or_get_playlist(sp, user_id, f"{pl_prefix}YT_2_SPOTIFY")
@@ -63,11 +65,11 @@ def main():
 
             youtube_track_ids = []
             for video_id, title in video_titles.items():
-                spotify_track_id = search_spotify_track(sp, title, min_similarity=0.65)
+                spotify_track_id = search_spotify_track(sp, title, min_similarity=0.65, verbose=args.verbose)
                 if spotify_track_id:
                     youtube_track_ids.append(spotify_track_id)
             unique_track_ids = list(dict.fromkeys(youtube_track_ids))
-            add_tracks_to_playlist(sp, playlist_id, unique_track_ids)
+            add_tracks_to_playlist(sp, playlist_id, unique_track_ids, testrun=args.test_run)
 
     if args.shazam or args.all:
         playlist_id = create_or_get_playlist(sp, user_id, f"{pl_prefix}SHAZAM_2_SPOTIFY")
@@ -75,9 +77,9 @@ def main():
             delete_all_playlist_tracks(sp, playlist_id)
         else:
             shazam_urls = load_links_from_json(json_file_path, category='shazam')
-            shazam_track_ids = asyncio.run(process_shazam_links(shazam_urls))
+            shazam_track_ids = asyncio.run(process_shazam_links(shazam_urls, verbose=args.verbose))
             unique_track_ids = list(dict.fromkeys(shazam_track_ids))
-            add_tracks_to_playlist(sp, playlist_id, unique_track_ids)
+            add_tracks_to_playlist(sp, playlist_id, unique_track_ids, testrun=args.test_run)
 
     if args.bandcamp or args.all:
         playlist_id = create_or_get_playlist(sp, user_id, f"{pl_prefix}BANDCAMP_2_SPOTIFY")
@@ -85,9 +87,9 @@ def main():
             delete_all_playlist_tracks(sp, playlist_id)
         else:
             bandcamp_urls = load_links_from_json(json_file_path, category='bandcamp')
-            bc_track_ids = process_bandcamp_links(bandcamp_urls)
+            bc_track_ids = process_bandcamp_links(bandcamp_urls, verbose=args.verbose)
             unique_track_ids = list(dict.fromkeys(bc_track_ids))
-            add_tracks_to_playlist(sp, playlist_id, unique_track_ids)
+            add_tracks_to_playlist(sp, playlist_id, unique_track_ids, testrun=args.test_run)
 
     if args.soundcloud or args.all:
         playlist_id = create_or_get_playlist(sp, user_id, f"{pl_prefix}SOUNDCLOUD_2_SPOTIFY")
@@ -95,9 +97,9 @@ def main():
             delete_all_playlist_tracks(sp, playlist_id)
         else:
             soundcloud_urls = load_links_from_json(json_file_path, category='soundcloud')
-            soundcloud_track_ids = process_soundcloud_links(soundcloud_urls)
+            soundcloud_track_ids = process_soundcloud_links(soundcloud_urls, verbose=args.verbose)
             unique_track_ids = list(dict.fromkeys(soundcloud_track_ids))
-            add_tracks_to_playlist(sp, playlist_id, unique_track_ids)
+            add_tracks_to_playlist(sp, playlist_id, unique_track_ids, testrun=args.test_run)
 
     if args.merge_playlists:
         playlist_id = create_or_get_playlist(sp, user_id, f"{pl_prefix}ALLSTARS")
@@ -114,7 +116,7 @@ def main():
             all_track_ids = collect_all_tracks_from_playlists(sp, user_id, playlist_names)
             all_unique_track_ids = list(dict.fromkeys(all_track_ids))
             # random.shuffle(all_unique_track_ids)
-            add_tracks_to_playlist(sp, playlist_id, all_unique_track_ids)
+            add_tracks_to_playlist(sp, playlist_id, all_unique_track_ids, testrun=args.test_run)
             check_for_duplicates_in_playlist(sp, playlist_id)
 
     if args.discogs_csv_path:
@@ -124,7 +126,7 @@ def main():
         else:
             discogs_track_ids = process_discogs_csv_rows(args.discogs_csv_path, min_similarity=0.8)
             unique_track_ids = list(dict.fromkeys(discogs_track_ids))
-            add_tracks_to_playlist(sp, playlist_id, unique_track_ids)
+            add_tracks_to_playlist(sp, playlist_id, unique_track_ids, testrun=args.test_run)
 
     if args.print_playlist_info:
         playlist_id = args.playlist_url.split("/")[-1].split("?")[0]

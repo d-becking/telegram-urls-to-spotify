@@ -32,10 +32,12 @@ def create_or_get_playlist(sp, user_id, playlist_name):
     for playlist in playlists['items']: # Check if playlist already exists
         if playlist['name'] == playlist_name:
             print(f"Playlist '{playlist_name}' already exists.")
+            print(f"~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
             return playlist['id']
     # Create new if does not exist
     new_playlist = sp.user_playlist_create(user_id, playlist_name, public=False)
     print(f"Created new playlist '{playlist_name}'.")
+    print(f"~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
     return new_playlist['id']
 
 def get_all_playlist_tracks(sp, playlist_id):
@@ -70,18 +72,30 @@ def delete_all_playlist_tracks(sp, playlist_id):
         print(f"{len(remaining_tracks['items'])} tracks remain in the playlist.")
 
 
-def add_tracks_to_playlist(sp, playlist_id, track_ids):
+def add_tracks_to_playlist(sp, playlist_id, track_ids, testrun=False):
     existing_track_ids = get_all_playlist_tracks(sp, playlist_id)
     # Filter track IDs that are already in pl
     new_tracks = [track_id for track_id in track_ids if track_id not in existing_track_ids]
     if new_tracks:
-        batch_size = 100
-        for i in range(0, len(new_tracks), batch_size):
-            batch = new_tracks[i:i + batch_size]
-            sp.playlist_add_items(playlist_id, batch)
-            print(f"Added {len(batch)} new tracks to the playlist.")
+        if testrun:
+            print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+            print(f"{len(new_tracks)} new tracks to add to the playlist.")
+            print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+            for id in new_tracks:
+                track = sp.track(id)
+                print(f"{[artist['name'] for artist in track['artists']]} - {track['name']}")
+        else:
+            batch_size = 100
+            for i in range(0, len(new_tracks), batch_size):
+                batch = new_tracks[i:i + batch_size]
+                sp.playlist_add_items(playlist_id, batch)
+                print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+                print(f"Added {len(batch)} new tracks to the playlist.")
+                print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
     else:
+        print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
         print("No new tracks to add; all tracks are already in the playlist.")
+        print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
 
 def collect_all_tracks_from_playlists(sp, user_id, playlist_names):
     all_track_ids = []
@@ -235,12 +249,13 @@ async def get_shazam_track_info(track_id):
     result = await shazam.track_about(track_id)  # Await the result from the Shazam API
     return result['title'], result['subtitle']
 
-async def process_shazam_links(shazam_links):
+async def process_shazam_links(shazam_links, verbose=False):
     track_ids = []
     for shazam_link in shazam_links:
         shid = extract_shazam_ids(shazam_link)
         title, artist = await get_shazam_track_info(shid)  # Await the track info
-        spotify_track_id = search_spotify_track(sp, query_title=title, query_artist=artist, min_similarity=0.7)
+        spotify_track_id = search_spotify_track(sp, query_title=title, query_artist=artist, min_similarity=0.7,
+                                                verbose=verbose)
         if spotify_track_id:
             track_ids.append(spotify_track_id)
     return track_ids
@@ -263,14 +278,15 @@ def scrape_bandcamp_track_info(link):
             return None, None
     return None, None
 
-def process_bandcamp_links(links):
+def process_bandcamp_links(links, verbose=False):
     track_ids = []
     for link in links:
         if not "/track/" in link:
             continue
         title, artist = scrape_bandcamp_track_info(link)
         if title or artist:
-            spotify_track_id = search_spotify_track(sp, query_title=title, query_artist=artist, min_similarity=0.7)
+            spotify_track_id = search_spotify_track(sp, query_title=title, query_artist=artist, min_similarity=0.7,
+                                                    verbose=verbose)
             if spotify_track_id:
                 track_ids.append(spotify_track_id)
     return track_ids
@@ -318,14 +334,15 @@ def scrape_soundcloud_track_info(link):
     except Exception as e:
         return None, None
 
-def process_soundcloud_links(links):
+def process_soundcloud_links(links, verbose=False):
     track_ids = []
     for link in links:
         title, artist = scrape_soundcloud_track_info(link)
         if title:
             title = re.sub(r'((?:[^-]+ - ){2}).*', r'\1', title)
         if title or artist:
-            spotify_track_id = search_spotify_track(sp, query_title=title, query_artist=artist, min_similarity=0.7)
+            spotify_track_id = search_spotify_track(sp, query_title=title, query_artist=artist, min_similarity=0.7,
+                                                    verbose=verbose)
             if spotify_track_id:
                 track_ids.append(spotify_track_id)
     return track_ids
@@ -439,7 +456,10 @@ def token_based_similarity(query, result, min_similarity=0.65, max_similarity=1.
     sim = np.mean([token_similarity, sequence_similarity]) * len_discrepancy_penalty * token_weight
 
     if return_sim:
-        return sim
+        if len(query_tokens) + len(result_tokens) == 6 and sim == 6/8:
+            return 1.0
+        else:
+            return sim
 
     elif len(query_tokens) <= 3:
         if max_similarity < 1:
@@ -452,11 +472,12 @@ def token_based_similarity(query, result, min_similarity=0.65, max_similarity=1.
         else:
             return sim > min_similarity
 
-def search_spotify_track(sp, query_title, query_artist=None, min_similarity=0.65):
+def search_spotify_track(sp, query_title, query_artist=None, min_similarity=0.65, verbose=False):
     def get_similarity(clean_query, track):
         artists = " ".join([a["name"] for a in track["artists"] if a["name"] not in track["name"]])
         result_str = f'{artists} - {track["name"]}'
-        if any(clean_string(artist["name"]) in clean_query for artist in track["artists"]):
+        if (any(clean_string(artist["name"]) in clean_query for artist in track["artists"]) or
+                any(clean_query.split(" - ")[0] in clean_string(artist["name"]) for artist in track["artists"])):
             similarity = token_based_similarity(clean_query, result_str, return_sim=True)
         else:
             similarity = 0.0
@@ -464,14 +485,21 @@ def search_spotify_track(sp, query_title, query_artist=None, min_similarity=0.65
     def process_results(clean_query, results, ini_track_id=None):
         best_sim = 0.0
         best_track_id = None
+        best_track = None
         for track in results['tracks']['items']:
             sim = get_similarity(clean_query, track)
             if sim > best_sim and sim > min_similarity:
                 best_sim = sim
                 best_track_id = track['id']
+                best_track = f'{" ".join([a["name"] for a in track["artists"] if a["name"] not in track["name"]])} - {track["name"]}'
             if track['id'] != ini_track_id and (sim < 0.44 or sim == 1):
                 break
+        if best_track and verbose:
+            print(f'---> resulted in: {best_track} (certainty {best_sim*100:.2f}%)')
         return best_track_id
+
+    if verbose:
+        print(f"Search for: {query_artist+' - ' if query_artist else ''} {query_title}")
 
     clean_query = clean_string(f"{query_artist} - {query_title}") if query_artist else clean_string(query_title)
     search_query = f"artist:{query_artist} track:{query_title}" if query_artist else clean_query
@@ -486,17 +514,28 @@ def search_spotify_track(sp, query_title, query_artist=None, min_similarity=0.65
     else:
         track1 = result['tracks']['items'][0]
         sim1 = get_similarity(clean_query, track1)
+        res1 = f'{" ".join([a["name"] for a in track1["artists"] if a["name"] not in track1["name"]])} - {track1["name"]}'
         if sim1 >= 0.9:
+            if verbose:
+                print(f'---> resulted in: {res1} (certainty {sim1*100:.2f}%)')
             return track1['id']
 
     # Extended search if the first track's similarity isn't high enough
     results_unfiltered = sp.search(q=search_query, type='track', limit=6)
     if not results_unfiltered['tracks']['items']:
+        if verbose:
+            print("---> resulted in: None (no matches found)")
         return None
     else:
         best_track_id = process_results(clean_query, results_unfiltered, ini_track_id=track1['id'])
 
-    return best_track_id if best_track_id else (track1['id'] if sim1 > min_similarity else None)
+        if verbose and best_track_id is None:
+            if sim1 >= min_similarity:
+                print(f'---> resulted in: {res1} (certainty {sim1*100:.2f}%)')
+            else:
+                print(f'---> resulted in: None - {res1} (certainty {sim1*100:.2f}%)')
+
+    return best_track_id if best_track_id else (track1['id'] if sim1 >= min_similarity else None)
 
 ########################################################################################################################
 
