@@ -84,7 +84,7 @@ line
    ```bash
    example_automator.sh 2024-09-13 --test_run
    ```
-using the --test_run parser argument will prevenrt the code from adding newly found tracks to the playlist(s).
+using the --test_run parser argument will prevent the code from adding newly found tracks to the playlist(s).
 
 ### License
 
