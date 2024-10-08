@@ -426,12 +426,14 @@ def clean_string(text):
     textup = re.sub(r'remastered', '', textup)
     textup = re.sub(r'remaster', '', textup)
     textup = re.sub(r'live version', '', textup)
-    textup = re.sub(r'[()]', '', textup)  # removes parentheses
-    textup = re.sub(r'\[.*?\]', '', textup)  # Remove anything inside square brackets such as '[WSNF093]'
+    # Remove content within parentheses if they don't contain specified keywords
     textup = re.sub(r'\((?!.*?\b(mix|remix|version|edit)\b).*?\)', '', textup)
+    # Remove content within brackets if they don't contain specified keywords
+    textup = re.sub(r'\[(?!.*?\b(mix|remix|version|edit)\b).*?\]', '', textup)
     # Remove unwanted characters, but keep non-alphanumeric characters if they are embedded within a word
     # Also keep accented characters within the Latin-1 Supplement Unicode block
     textup = re.sub(r'(?<![\w\u00C0-\u017F])[^\w\s\-\u00C0-\u017F](?![\w\u00C0-\u017F])', '', textup)
+    textup = re.sub(r'[()]', '', textup)  # removes parentheses
     return textup.strip()  # Remove Leading and Trailing Whitespace
 
 def clean_discogs_string(text):
@@ -479,6 +481,8 @@ def search_spotify_track(sp, query_title, query_artist=None, min_similarity=0.65
         if (any(clean_string(artist["name"]) in clean_query for artist in track["artists"]) or
                 any(clean_query.split(" - ")[0] in clean_string(artist["name"]) for artist in track["artists"])):
             similarity = token_based_similarity(clean_query, result_str, return_sim=True)
+        elif SequenceMatcher(None, clean_query, result_str).ratio() > 0.9:
+            similarity = token_based_similarity(clean_query, result_str, return_sim=False)
         else:
             similarity = 0.0
         return similarity
@@ -501,14 +505,16 @@ def search_spotify_track(sp, query_title, query_artist=None, min_similarity=0.65
     if verbose:
         print(f"Search for: {query_artist+' - ' if query_artist else ''} {query_title}")
 
-    clean_query = clean_string(f"{query_artist} - {query_title}") if query_artist else clean_string(query_title)
+    if query_artist:
+        query_artist = clean_string(query_artist)
+    clean_query = f"{query_artist} - {clean_string(query_title)}" if query_artist else clean_string(query_title)
     search_query = f"artist:{query_artist} track:{query_title}" if query_artist else clean_query
 
     # Initial search
     result = sp.search(q=search_query, type='track', limit=1)
     if not result['tracks']['items']:
         if query_artist:  # try w/o artist(s) because title might contain artist(s)
-            return search_spotify_track(sp, query_title, min_similarity=min_similarity)
+            return search_spotify_track(sp, query_title, min_similarity=min_similarity, verbose=verbose)
         else:
             sim1 = 0.0
     else:
