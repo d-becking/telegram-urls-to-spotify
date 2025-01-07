@@ -97,8 +97,9 @@ def add_tracks_to_playlist(sp, playlist_id, track_ids, testrun=False):
         print("No new tracks to add; all tracks are already in the playlist.")
         print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
 
-def collect_all_tracks_from_playlists(sp, user_id, playlist_names):
+def collect_all_tracks_from_playlists(sp, user_id, playlist_names, return_metadata=False):
     all_track_ids = []
+    metadata = {"artists": [], "year": [], "label": []}
     for playlist_name in playlist_names:
         playlist_id = create_or_get_playlist(sp, user_id, playlist_name)
         offset = 0
@@ -111,8 +112,19 @@ def collect_all_tracks_from_playlists(sp, user_id, playlist_names):
                 track_id = track['track']['id']
                 if track_id:
                     all_track_ids.append(track_id)
+                    if return_metadata:
+                        album_id = track['track']['album']['id']
+                        album_details = sp.album(album_id)
+                        year = album_details['release_date'].split('-')[0]
+                        label = album_details['label']
+                        metadata["artists"].append(', '.join([artist['name'] for artist in track['track']['artists']]))
+                        metadata["year"].append(year)
+                        metadata["label"].append(label)
             offset += 100  # Increase the offset to get next batch
-    return all_track_ids
+    if not return_metadata:
+        return all_track_ids
+    else:
+        return all_track_ids, metadata
 
 def check_for_duplicates_in_playlist(sp, playlist_id):
     existing_tracks = get_all_playlist_tracks(sp, playlist_id)
@@ -427,13 +439,13 @@ def clean_string(text):
     textup = re.sub(r'remaster', '', textup)
     textup = re.sub(r'live version', '', textup)
     # Remove content within parentheses if they don't contain specified keywords
-    textup = re.sub(r'\((?!.*?\b(mix|remix|version|edit)\b).*?\)', '', textup)
+    textup = re.sub(r'\((?!.*?\b(mix|remix|version|edit|rework)\b).*?\)', '', textup)
     # Remove content within brackets if they don't contain specified keywords
-    textup = re.sub(r'\[(?!.*?\b(mix|remix|version|edit)\b).*?\]', '', textup)
+    textup = re.sub(r'\[(?!.*?\b(mix|remix|version|edit|rework)\b).*?\]', '', textup)
     # Remove unwanted characters, but keep non-alphanumeric characters if they are embedded within a word
     # Also keep accented characters within the Latin-1 Supplement Unicode block
     textup = re.sub(r'(?<![\w\u00C0-\u017F])[^\w\s\-\u00C0-\u017F](?![\w\u00C0-\u017F])', '', textup)
-    textup = re.sub(r'[()]', '', textup)  # removes parentheses
+    # textup = re.sub(r'[()]', '', textup)  # removes parentheses
     return textup.strip()  # Remove Leading and Trailing Whitespace
 
 def clean_discogs_string(text):
