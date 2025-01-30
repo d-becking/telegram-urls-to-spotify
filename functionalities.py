@@ -216,7 +216,7 @@ def extract_spotify_track_ids(spotify_links):
 def extract_youtube_video_ids(youtube_links):
     video_ids = []
     for link in youtube_links:
-        if 'playlist' in link:
+        if 'playlist' in link or 'live' in link:
             continue
         if 'youtu.be' in link:
             video_id = link.split('/')[-1]
