@@ -15,7 +15,7 @@ from functionalities import (process_html_files, load_links_from_json, create_or
 
 parser = argparse.ArgumentParser(description='Spotify Playlist Automat (SPA)')
 parser.add_argument('--extract_new_links', action="store_true", help='extract links from Telegram-exported chat html data')
-parser.add_argument("--tg_chat_export_path", default="./chat_data", type=str, help='path to Telegram-exported html files')
+parser.add_argument("--tg_chat_export_path", default="", type=str, help='path to Telegram-exported html files')
 parser.add_argument("--spotify", action="store_true", help='generate/update spotify playlist')
 parser.add_argument("--yt", action="store_true", help='generate/update youtube playlist')
 parser.add_argument("--shazam", action="store_true", help='generate/update shazam playlist')
@@ -35,7 +35,8 @@ print("#########################################################################
 
 def main():
     args = parser.parse_args()
-    json_file_path = f"{args.tg_chat_export_path}/categorized_links.json"
+    if args.tg_chat_export_path:
+        json_file_path = f"{args.tg_chat_export_path}/categorized_links.json"
     user_id = sp.current_user()['id']
     pl_prefix = args.pers_pl_name_pref + '_' if args.pers_pl_name_pref else ''
 
@@ -132,6 +133,8 @@ def main():
 
     if args.print_playlist_info:
         playlist_id = args.playlist_url.split("/")[-1].split("?")[0]
+        if playlist_id == '<YOUR_PLAYLIST_ID>':
+            playlist_id = create_or_get_playlist(sp, user_id, f"{pl_prefix}ALLSTARS")
         get_playlist_info(playlist_id)
 
     if args.analyse_playlist_metadata:

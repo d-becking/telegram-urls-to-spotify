@@ -426,7 +426,7 @@ def process_discogs_csv_rows(discogs_csv_path, min_similarity=0.65):
 
 
 ############################################### Search engine #########################################################
-def clean_string(text):
+def clean_string(text, parentheses=True):
     textup = text.lower()  # Lowercase the string
     textup = textup.replace('\u200b', '')  # Remove zero-width spaces (e.g., \u200b)
     textup = textup.replace('â\x80\x93', '-')  # Replace corrupted en dash
@@ -438,10 +438,11 @@ def clean_string(text):
     textup = re.sub(r'remastered', '', textup)
     textup = re.sub(r'remaster', '', textup)
     textup = re.sub(r'live version', '', textup)
-    # Remove content within parentheses if they don't contain specified keywords
-    textup = re.sub(r'\((?!.*?\b(mix|remix|version|edit|rework)\b).*?\)', '', textup)
-    # Remove content within brackets if they don't contain specified keywords
-    textup = re.sub(r'\[(?!.*?\b(mix|remix|version|edit|rework)\b).*?\]', '', textup)
+    if not parentheses:
+        # Remove content within parentheses if they don't contain specified keywords
+        textup = re.sub(r'\((?!.*?\b(mix|remix|version|edit|rework)\b).*?\)', '', textup)
+        # Remove content within brackets if they don't contain specified keywords
+        textup = re.sub(r'\[(?!.*?\b(mix|remix|version|edit|rework)\b).*?\]', '', textup)
     # Remove unwanted characters, but keep non-alphanumeric characters if they are embedded within a word
     # Also keep accented characters within the Latin-1 Supplement Unicode block
     textup = re.sub(r'(?<![\w\u00C0-\u017F])[^\w\s\-\u00C0-\u017F](?![\w\u00C0-\u017F])', '', textup)
@@ -452,9 +453,9 @@ def clean_discogs_string(text):
     textup = re.sub(r'\s*\(\d+\)', '', text)  # remove the (NUMBER) pattern from the artist or label name
     return textup.strip()
 
-def token_based_similarity(query, result, min_similarity=0.65, max_similarity=1.0, return_sim=False):
-    clean_query = clean_string(query)
-    clean_result = clean_string(result)
+def token_based_similarity(query, result, min_similarity=0.65, max_similarity=1.0, return_sim=False, parentheses=True):
+    clean_query = clean_string(query, parentheses=parentheses)
+    clean_result = clean_string(result, parentheses=parentheses)
 
     query_tokens = set(clean_query.split())
     result_tokens = set(clean_result.split())
@@ -468,6 +469,10 @@ def token_based_similarity(query, result, min_similarity=0.65, max_similarity=1.
     sequence_similarity = SequenceMatcher(None, clean_query, clean_result).ratio()
 
     sim = np.mean([token_similarity, sequence_similarity]) * len_discrepancy_penalty * token_weight
+
+    if parentheses == True and sim < min_similarity:
+        return token_based_similarity(query, result, min_similarity=min_similarity, max_similarity=max_similarity,
+                                      return_sim=return_sim, parentheses=False)
 
     if return_sim:
         if len(query_tokens) + len(result_tokens) == 6 and sim == 6/8:
@@ -572,6 +577,23 @@ def get_playlist_info(playlist_id):
         if response['next'] is None:
             break
         offset += limit
+
+    csv_filename = "tracks.csv"
+
+    # Open the CSV file in write mode
+    with open(csv_filename, mode='w', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file)
+        writer.writerow(["Track Name", "Artist(s)", "Album Name", "Release Date"])
+        for item in tracks:
+            track = item['track']
+            artist_names = ', '.join([artist['name'] for artist in track['artists']])
+            track_name = track['name']
+            album_name = track['album']['name']
+            release_date = track['album']['release_date']
+            writer.writerow([track_name, artist_names, album_name, release_date])
+
+    print(f"Data successfully saved to {csv_filename}")
+
     for idx, item in enumerate(tracks):
         track = item['track']
         added_at = item['added_at']
@@ -579,6 +601,7 @@ def get_playlist_info(playlist_id):
         print(f"Name: {track['name']}")
         print(f"Artist(s): {', '.join([artist['name'] for artist in track['artists']])}")
         print(f"Album: {track['album']['name']}")
+        print(f"release date: {track['album']['release_date']}")
         print(f"Added at: {added_at}")
         print(f"Duration: {track['duration_ms'] // 60000} min {track['duration_ms'] % 60000 // 1000} sec")
 ########################################################################################################################

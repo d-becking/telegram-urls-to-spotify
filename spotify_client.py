@@ -15,4 +15,5 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
     redirect_uri=SPOTIPY_REDIRECT_URI,
     scope="playlist-modify-private playlist-read-private",
     cache_path=cache_path,
+    requests_timeout=25
 ))
