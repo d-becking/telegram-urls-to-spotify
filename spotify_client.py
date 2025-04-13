@@ -9,11 +9,14 @@ SPOTIPY_REDIRECT_URI = os.getenv("SPOTIPY_REDIRECT_URI", "http://localhost:8080"
 
 cache_path = f".spotify-auth-{SPOTIPY_CLIENT_ID[:6]}-cache"
 
-sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
-    client_id=SPOTIPY_CLIENT_ID,
-    client_secret=SPOTIPY_CLIENT_SECRET,
-    redirect_uri=SPOTIPY_REDIRECT_URI,
-    scope="playlist-modify-private playlist-read-private",
-    cache_path=cache_path,
-    requests_timeout=25
-))
+sp = spotipy.Spotify(
+    auth_manager=SpotifyOAuth(
+        client_id=SPOTIPY_CLIENT_ID,
+        client_secret=SPOTIPY_CLIENT_SECRET,
+        redirect_uri=SPOTIPY_REDIRECT_URI,
+        scope="playlist-modify-private playlist-read-private",
+        cache_path=cache_path,
+        requests_timeout=60
+    ),
+    requests_timeout=60
+)
